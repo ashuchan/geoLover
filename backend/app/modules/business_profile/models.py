@@ -360,6 +360,9 @@ class FreeAuditToken(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), nullable=False
     )
+    audit_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

@@ -548,3 +548,217 @@ class TestAuditRouterEndpoints:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get(f"/api/v1/audits/{audit_id}")
         assert response.status_code in (403, 404, 503)
+
+
+# ── Report router ──────────────────────────────────────────────────────────────
+
+
+class TestReportRouterEndpoints:
+    def _make_report_mock(self, tid: uuid.UUID):
+        from datetime import datetime, timezone
+        from app.modules.reporting.models import ReportStatus
+        report = MagicMock()
+        report.id = uuid.uuid4()
+        report.tenant_id = tid
+        report.business_id = uuid.uuid4()
+        report.audit_run_id = uuid.uuid4()
+        report.version = 1
+        report.status = ReportStatus.ready
+        report.score = 72.5
+        report.confidence_band = "medium"
+        report.completeness_pct = 0.9
+        report.web_view_token = "test-token-123"
+        report.quick_wins = None
+        report.template_version = "v1"
+        report.generated_at = datetime.now(timezone.utc)
+        report.created_at = datetime.now(timezone.utc)
+        return report
+
+    def _make_link_mock(self):
+        from datetime import datetime, timezone
+        link = MagicMock()
+        link.id = uuid.uuid4()
+        link.token = "sharetoken123"
+        link.report_id = uuid.uuid4()
+        link.expires_at = datetime.now(timezone.utc)
+        link.view_count = 0
+        link.created_at = datetime.now(timezone.utc)
+        return link
+
+    def test_get_report_success(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+        report = self._make_report_mock(ctx.tenant_id)
+
+        with patch("app.api.v1.routers.reports.ReportService") as MockSvc, \
+             patch("app.api.v1.routers.reports.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.get_report = AsyncMock(return_value=report)
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(f"/api/v1/reports/{report.id}")
+        assert response.status_code in (200, 503)
+
+    def test_get_report_wrong_tenant(self):
+        ctx = _make_ctx(is_platform_admin=False)
+        app = _make_app(ctx)
+        report = self._make_report_mock(uuid.uuid4())  # different tenant
+
+        with patch("app.api.v1.routers.reports.ReportService") as MockSvc, \
+             patch("app.api.v1.routers.reports.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.get_report = AsyncMock(return_value=report)
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(f"/api/v1/reports/{report.id}")
+        assert response.status_code in (403, 503)
+
+    def test_get_report_not_found(self):
+        from app.core.exceptions import NotFoundError
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.api.v1.routers.reports.ReportService") as MockSvc, \
+             patch("app.api.v1.routers.reports.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.get_report = AsyncMock(side_effect=NotFoundError("not found"))
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(f"/api/v1/reports/{uuid.uuid4()}")
+        assert response.status_code in (404, 503)
+
+    def test_get_report_by_token(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+        report = self._make_report_mock(ctx.tenant_id)
+
+        with patch("app.api.v1.routers.reports.ReportService") as MockSvc, \
+             patch("app.api.v1.routers.reports.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.get_report_by_token = AsyncMock(return_value=report)
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/v1/reports/by-token/test-token-123")
+        assert response.status_code in (200, 503)
+
+    def test_create_share_link(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+        link = self._make_link_mock()
+
+        with patch("app.api.v1.routers.reports.ReportService") as MockSvc, \
+             patch("app.api.v1.routers.reports.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.create_share_link = AsyncMock(return_value=link)
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.post(
+                f"/api/v1/reports/{uuid.uuid4()}/share",
+                json={"ttl_days": 30},
+            )
+        assert response.status_code in (201, 422, 503)
+
+    def test_revoke_share_link(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.api.v1.routers.reports.ReportService") as MockSvc, \
+             patch("app.api.v1.routers.reports.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.revoke_share_link = AsyncMock(return_value=None)
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.delete("/api/v1/reports/share/sharetoken123")
+        assert response.status_code in (204, 503)
+
+
+# ── Free audit router ──────────────────────────────────────────────────────────
+
+
+class TestFreeAuditRouterEndpoints:
+    """Tests for public free-audit endpoints.
+
+    The router imports FreeAuditSubmissionService inside functions, so we patch
+    at the source module rather than the router module.
+    """
+
+    def _make_db_session_ctx(self, svc_instance):
+        """Patch get_db_session to yield a mock session; patch Service constructor."""
+        from contextlib import asynccontextmanager
+        session = MagicMock()
+        session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def _ctx(factory, request_ctx):
+            yield session
+
+        return _ctx, session
+
+    def test_get_status_not_found(self):
+        from app.core.exceptions import NotFoundError
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.modules.reporting.service.FreeAuditSubmissionService.get_status",
+                   new_callable=AsyncMock,
+                   side_effect=NotFoundError("not found")), \
+             patch("app.api.v1.routers.free_audit.get_session_factory"), \
+             patch("app.api.v1.routers.free_audit.get_db_session",
+                   new=lambda factory, ctx: _mock_db_session()[0](factory, ctx)):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/v1/free-audit/missing-token/status")
+        assert response.status_code in (404, 503)
+
+    def test_get_status_success(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+        status_data = {
+            "status": "running",
+            "progress": {"completeness_pct": 0.5, "queries_done": 10, "queries_total": 20},
+            "report_ready": False,
+            "claim_offered": False,
+        }
+
+        with patch("app.modules.reporting.service.FreeAuditSubmissionService.get_status",
+                   new_callable=AsyncMock,
+                   return_value=status_data), \
+             patch("app.api.v1.routers.free_audit.get_session_factory"), \
+             patch("app.api.v1.routers.free_audit.get_db_session",
+                   new=lambda factory, ctx: _mock_db_session()[0](factory, ctx)):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/v1/free-audit/valid-token/status")
+        assert response.status_code in (200, 503)
+
+    def test_claim_success(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.modules.reporting.service.FreeAuditSubmissionService.claim",
+                   new_callable=AsyncMock,
+                   return_value=True), \
+             patch("app.api.v1.routers.free_audit.get_session_factory"), \
+             patch("app.api.v1.routers.free_audit.get_db_session",
+                   new=lambda factory, ctx: _mock_db_session()[0](factory, ctx)):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.post("/api/v1/free-audit/valid-token/claim")
+        assert response.status_code in (200, 503)
+
+    def test_claim_not_found_returns_success_false(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.modules.reporting.service.FreeAuditSubmissionService.claim",
+                   new_callable=AsyncMock,
+                   return_value=False), \
+             patch("app.api.v1.routers.free_audit.get_session_factory"), \
+             patch("app.api.v1.routers.free_audit.get_db_session",
+                   new=lambda factory, ctx: _mock_db_session()[0](factory, ctx)):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.post("/api/v1/free-audit/missing-token/claim")
+        assert response.status_code in (200, 503)

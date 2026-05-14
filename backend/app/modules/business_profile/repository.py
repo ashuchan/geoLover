@@ -322,12 +322,14 @@ class FreeAuditTokenRepository:
         business_id: uuid.UUID,
         tenant_id: uuid.UUID,
         expires_at: datetime,
+        audit_run_id: Optional[uuid.UUID] = None,
     ) -> FreeAuditToken:
         fat = FreeAuditToken(
             token=token,
             business_id=business_id,
             tenant_id=tenant_id,
             expires_at=expires_at,
+            audit_run_id=audit_run_id,
         )
         self._session.add(fat)
         await self._session.flush()
@@ -335,9 +337,11 @@ class FreeAuditTokenRepository:
 
     async def mark_claimed(self, token: str) -> Optional[FreeAuditToken]:
         fat = await self.get_by_token(token)
-        if fat:
+        if fat and fat.claimed_at is None:
             fat.claimed_at = _utcnow()
             await self._session.flush()
+        elif fat and fat.claimed_at is not None:
+            return None  # already claimed
         return fat
 
 

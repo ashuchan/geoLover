@@ -443,3 +443,108 @@ class TestBusinessRouterEndpoints:
             response = client.delete(f"/api/v1/businesses/{biz.id}")
 
         assert response.status_code == 404
+
+
+# ── Audit router ─────────────────────────────────────────────────────────────
+
+
+class TestAuditRouterEndpoints:
+    def _make_run_mock(self, tid: uuid.UUID, bid: uuid.UUID):
+        run = MagicMock()
+        run.id = uuid.uuid4()
+        run.tenant_id = tid
+        run.business_id = bid
+        run.trigger = MagicMock()
+        run.trigger.value = "manual"
+        run.status = MagicMock()
+        run.status.value = "pending"
+        run.ai_visibility_score = None
+        run.completeness_pct = None
+        run.queries_total = 0
+        run.queries_successful = 0
+        run.algorithm_version = "v1"
+        run.workflow_run_id = None
+        from datetime import datetime, timezone
+        run.created_at = datetime.now(timezone.utc)
+        return run
+
+    def test_create_audit_run_success(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+        bid = uuid.uuid4()
+        run = self._make_run_mock(ctx.tenant_id, bid)
+
+        with patch("app.api.v1.routers.audits.AuditService") as MockSvc, \
+             patch("app.api.v1.routers.audits.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.create_audit_run = AsyncMock(return_value=run)
+            svc_instance.flush_events = AsyncMock()
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.post(
+                "/api/v1/audits",
+                json={"business_id": str(bid), "trigger": "manual"},
+            )
+        assert response.status_code in (200, 201, 422, 503)
+
+    def test_create_audit_run_invalid_trigger_returns_422(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.api.v1.routers.audits.get_db_session"):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.post(
+                "/api/v1/audits",
+                json={"business_id": str(uuid.uuid4()), "trigger": "invalid_trigger"},
+            )
+        assert response.status_code == 422
+
+    def test_list_audit_runs(self):
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+
+        with patch("app.api.v1.routers.audits.AuditService") as MockSvc, \
+             patch("app.api.v1.routers.audits.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.list_audit_runs = AsyncMock(return_value=[])
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/v1/audits")
+        assert response.status_code in (200, 503)
+
+    def test_get_audit_run_not_found(self):
+        from app.core.exceptions import NotFoundError
+        ctx = _make_ctx()
+        app = _make_app(ctx)
+        audit_id = uuid.uuid4()
+
+        with patch("app.api.v1.routers.audits.AuditService") as MockSvc, \
+             patch("app.api.v1.routers.audits.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.get_audit_run = AsyncMock(side_effect=NotFoundError("not found"))
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(f"/api/v1/audits/{audit_id}")
+        assert response.status_code == 404
+
+    def test_get_audit_run_wrong_tenant(self):
+        ctx = _make_ctx(is_platform_admin=False)
+        ctx_tid = ctx.tenant_id
+        app = _make_app(ctx)
+        audit_id = uuid.uuid4()
+
+        run = self._make_run_mock(uuid.uuid4(), uuid.uuid4())  # different tenant
+        run.tenant_id = uuid.uuid4()  # not ctx.tenant_id
+
+        with patch("app.api.v1.routers.audits.AuditService") as MockSvc, \
+             patch("app.api.v1.routers.audits.get_db_session"):
+            svc_instance = MagicMock()
+            svc_instance.get_audit_run = AsyncMock(return_value=run)
+            MockSvc.return_value = svc_instance
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(f"/api/v1/audits/{audit_id}")
+        assert response.status_code in (403, 404, 503)

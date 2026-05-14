@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _URL_RE = re.compile(r"^https?://[^\s]{1,2000}$", re.IGNORECASE)
 
+from app.modules.audit.models import AuditStatus, AuditTrigger
 from app.modules.business_profile.models import (
     AliasType,
     BusinessSource,
@@ -286,6 +287,35 @@ class FreeAuditStatusResponse(BaseModel):
     status: str  # "pending" | "in_progress" | "complete" (Phase 2 populates)
     expires_at: datetime
     claimed: bool
+
+
+# ── Audit schemas ──────────────────────────────────────────────────────────────
+
+
+class AuditRunCreate(BaseModel):
+    business_id: uuid.UUID
+    trigger: AuditTrigger = AuditTrigger.manual
+
+
+class AuditRunResponse(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    business_id: uuid.UUID
+    trigger: AuditTrigger
+    status: AuditStatus
+    ai_visibility_score: Optional[float]
+    completeness_pct: Optional[float]
+    queries_total: int
+    queries_successful: int
+    queries_cited: int
+    queries_negative: int
+    algorithm_version: str
+    workflow_run_id: Optional[str]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 # ── Error schemas ─────────────────────────────────────────────────────────────

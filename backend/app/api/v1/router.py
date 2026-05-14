@@ -10,6 +10,7 @@ from app.api.v1.routers.notifications import router as notifications_router
 from app.api.v1.routers.publishing import router as publishing_router
 from app.api.v1.routers.reports import router as reports_router
 from app.api.v1.routers.tenants import router as tenants_router
+from app.api.v1.routers.agency import router as agency_router
 
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(tenants_router)
@@ -20,3 +21,4 @@ v1_router.include_router(free_audit_router)
 v1_router.include_router(content_router)
 v1_router.include_router(publishing_router)
 v1_router.include_router(notifications_router)
+v1_router.include_router(agency_router)

@@ -105,6 +105,9 @@ def postgres_container():
             yield pg
     except ImportError:
         pytest.skip("testcontainers not installed")
+    except Exception as exc:
+        # Docker not available (DockerException, ConnectionError, etc.)
+        pytest.skip(f"Docker not available: {exc}")
 
 
 @pytest.fixture(scope="session")

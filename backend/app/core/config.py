@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import Field, FieldValidationInfo, PostgresDsn, RedisDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     jwt_algorithm: _ALLOWED_JWT_ALGORITHMS = "HS256"  # type: ignore[valid-type]
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 30
+    # Optional JWT claims; set to Auth0 API identifier and domain in production.
+    # When set, tokens missing or mismatching these claims are rejected.
+    jwt_audience: Optional[str] = None
+    jwt_issuer: Optional[str] = None
 
     # Encryption (KMS envelope)
     encryption_master_key: SecretStr = Field(
@@ -86,10 +90,13 @@ class Settings(BaseSettings):
 
     @field_validator("allowed_hosts", mode="after")
     @classmethod
-    def _no_wildcard_in_production(cls, v: list[str], info: FieldValidationInfo) -> list[str]:
+    def _validate_allowed_hosts(cls, v: list[str], info: FieldValidationInfo) -> list[str]:
         env = info.data.get("environment", "development")
-        if env == "production" and "*" in v:
-            raise ValueError("allowed_hosts must not contain '*' in production environments")
+        if env == "production":
+            if not v:
+                raise ValueError("allowed_hosts must be non-empty in production environments")
+            if "*" in v:
+                raise ValueError("allowed_hosts must not contain '*' in production environments")
         return v
 
     @field_validator("environment", mode="before")

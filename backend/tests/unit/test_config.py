@@ -39,8 +39,8 @@ class TestSettings:
     def test_environment_normalised_to_lowercase(self):
         from app.core.config import Settings
 
-        s = Settings(**_make_settings_kwargs({"environment": "PRODUCTION"}))
-        assert s.environment == "production"
+        s = Settings(**_make_settings_kwargs({"environment": "STAGING"}))
+        assert s.environment == "staging"
 
     def test_invalid_environment_raises(self):
         from app.core.config import Settings
@@ -130,3 +130,38 @@ class TestSettings:
 
         s = Settings(**_make_settings_kwargs({"environment": "development", "allowed_hosts": ["*"]}))
         assert "*" in s.allowed_hosts
+
+    def test_empty_allowed_hosts_in_production_raises(self):
+        from app.core.config import Settings
+
+        with pytest.raises(PydanticValidationError, match="non-empty"):
+            Settings(**_make_settings_kwargs({"environment": "production", "allowed_hosts": []}))
+
+    def test_valid_production_settings(self):
+        from app.core.config import Settings
+
+        s = Settings(
+            **_make_settings_kwargs({
+                "environment": "production",
+                "allowed_hosts": ["api.citedby.app", "*.citedby.app"],
+            })
+        )
+        assert s.environment == "production"
+        assert len(s.allowed_hosts) == 2
+
+    def test_jwt_audience_and_issuer_default_none(self):
+        from app.core.config import Settings
+
+        s = Settings(**_make_settings_kwargs())
+        assert s.jwt_audience is None
+        assert s.jwt_issuer is None
+
+    def test_jwt_audience_and_issuer_can_be_set(self):
+        from app.core.config import Settings
+
+        s = Settings(**_make_settings_kwargs({
+            "jwt_audience": "https://api.citedby.app",
+            "jwt_issuer": "https://citedby.auth0.com/",
+        }))
+        assert s.jwt_audience == "https://api.citedby.app"
+        assert s.jwt_issuer == "https://citedby.auth0.com/"

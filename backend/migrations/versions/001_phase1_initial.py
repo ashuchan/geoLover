@@ -292,10 +292,12 @@ def _apply_rls_policies() -> None:
             f"USING (current_setting('app.is_platform_admin', true)::boolean = true)"
         )
 
-    # Business-scope filter for scoped roles
+    # Business-scope filter: RESTRICTIVE so it applies even when tenant_read also passes.
+    # Allows broad access when scope is 'ALL' (agency_admin / business_owner) or the
+    # business id appears in the comma-delimited scope list (business_member).
     op.execute(
         """
-        CREATE POLICY businesses_scope_filter ON businesses FOR SELECT
+        CREATE POLICY businesses_scope_filter ON businesses AS RESTRICTIVE FOR SELECT
         USING (
             tenant_id = current_setting('app.current_tenant', true)::uuid
             AND (

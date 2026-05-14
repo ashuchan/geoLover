@@ -47,9 +47,23 @@ class AuthenticatedUser(BaseModel):
 # ── JWT validation ────────────────────────────────────────────────────────────
 
 
-def _decode_jwt(token: str, secret: str, algorithm: str) -> TokenPayload:
+def _decode_jwt(
+    token: str,
+    secret: str,
+    algorithm: str,
+    *,
+    audience: Optional[str] = None,
+    issuer: Optional[str] = None,
+) -> TokenPayload:
     try:
-        payload = jwt.decode(token, secret, algorithms=[algorithm])
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=[algorithm],
+            audience=audience,
+            issuer=issuer,
+            options={"require_exp": True},
+        )
         return TokenPayload(**payload)
     except JWTError as exc:
         raise AuthenticationError(f"Invalid token: {exc}") from exc
@@ -76,11 +90,11 @@ async def _resolve_tenant_from_host(
 # ── Dependency factories (these depend on app startup wiring) ─────────────────
 
 
-def get_jwt_settings() -> tuple[str, str]:
-    """Return (secret_key, algorithm) from app settings."""
+def get_jwt_settings() -> tuple[str, str, Optional[str], Optional[str]]:
+    """Return (secret_key, algorithm, audience, issuer) from app settings."""
     from app.core.config import get_settings
     s = get_settings()
-    return s.secret_key.get_secret_value(), s.jwt_algorithm
+    return s.secret_key.get_secret_value(), s.jwt_algorithm, s.jwt_audience, s.jwt_issuer
 
 
 def get_master_key() -> str:
@@ -162,10 +176,10 @@ async def get_tenant_context(request: Request) -> TenantContext:
         )
 
     token = auth_header[len("Bearer "):]
-    secret, algorithm = get_jwt_settings()
+    secret, algorithm, audience, issuer = get_jwt_settings()
 
     try:
-        payload = _decode_jwt(token, secret, algorithm)
+        payload = _decode_jwt(token, secret, algorithm, audience=audience, issuer=issuer)
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)

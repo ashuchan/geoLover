@@ -31,11 +31,16 @@ def _make_membership(**kw) -> Membership:
 
 
 class TestDecodeJwt:
-    def test_valid_token(self):
+    def _make_token(self, payload: dict, secret: str = "a" * 32, algorithm: str = "HS256") -> str:
+        import time
         from jose import jwt
 
+        payload.setdefault("exp", int(time.time()) + 3600)
+        return jwt.encode(payload, secret, algorithm=algorithm)
+
+    def test_valid_token(self):
         secret = "a" * 32
-        token = jwt.encode({"sub": "auth0|123", "is_platform_admin": False}, secret, algorithm="HS256")
+        token = self._make_token({"sub": "auth0|123", "is_platform_admin": False}, secret)
         payload = _decode_jwt(token, secret, "HS256")
         assert payload.sub == "auth0|123"
         assert payload.is_platform_admin is False
@@ -45,20 +50,59 @@ class TestDecodeJwt:
             _decode_jwt("bad.token.here", "secret", "HS256")
 
     def test_wrong_secret_raises_auth_error(self):
-        from jose import jwt
-
-        token = jwt.encode({"sub": "auth0|xyz"}, "correct_secret" * 3, algorithm="HS256")
+        token = self._make_token({"sub": "auth0|xyz"}, "correct_secret" * 3)
         with pytest.raises(AuthenticationError):
             _decode_jwt(token, "wrong_secret" * 3, "HS256")
 
     def test_payload_with_tenant_id(self):
-        from jose import jwt
-
         tid = str(uuid.uuid4())
         secret = "s" * 32
-        token = jwt.encode({"sub": "auth0|abc", "tenant_id": tid}, secret, algorithm="HS256")
+        token = self._make_token({"sub": "auth0|abc", "tenant_id": tid}, secret)
         payload = _decode_jwt(token, secret, "HS256")
         assert payload.tenant_id == tid
+
+    def test_missing_exp_raises_auth_error(self):
+        from jose import jwt
+
+        secret = "a" * 32
+        token = jwt.encode({"sub": "auth0|123"}, secret, algorithm="HS256")
+        with pytest.raises(AuthenticationError):
+            _decode_jwt(token, secret, "HS256")
+
+    def test_expired_token_raises_auth_error(self):
+        import time
+        from jose import jwt
+
+        secret = "a" * 32
+        token = jwt.encode({"sub": "auth0|123", "exp": int(time.time()) - 10}, secret, algorithm="HS256")
+        with pytest.raises(AuthenticationError):
+            _decode_jwt(token, secret, "HS256")
+
+    def test_audience_mismatch_raises_auth_error(self):
+        secret = "a" * 32
+        token = self._make_token({"sub": "auth0|123", "aud": "https://api.correct.com"}, secret)
+        with pytest.raises(AuthenticationError):
+            _decode_jwt(token, secret, "HS256", audience="https://api.other.com")
+
+    def test_audience_matched(self):
+        secret = "a" * 32
+        aud = "https://api.citedby.app"
+        token = self._make_token({"sub": "auth0|123", "aud": aud}, secret)
+        payload = _decode_jwt(token, secret, "HS256", audience=aud)
+        assert payload.sub == "auth0|123"
+
+    def test_issuer_mismatch_raises_auth_error(self):
+        secret = "a" * 32
+        token = self._make_token({"sub": "auth0|123", "iss": "https://wrong.auth0.com/"}, secret)
+        with pytest.raises(AuthenticationError):
+            _decode_jwt(token, secret, "HS256", issuer="https://correct.auth0.com/")
+
+    def test_issuer_matched(self):
+        secret = "a" * 32
+        iss = "https://citedby.auth0.com/"
+        token = self._make_token({"sub": "auth0|123", "iss": iss}, secret)
+        payload = _decode_jwt(token, secret, "HS256", issuer=iss)
+        assert payload.sub == "auth0|123"
 
 
 # ── _resolve_tenant_from_host ─────────────────────────────────────────────────

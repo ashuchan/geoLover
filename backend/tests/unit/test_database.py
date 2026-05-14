@@ -196,8 +196,7 @@ class TestDatabaseManagerSessions:
         from sqlalchemy import NullPool
 
         engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=NullPool)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # Session lifecycle tests don't need any tables
 
         mgr = DatabaseManager()
         # Manually wire an sqlite-backed factory
@@ -225,8 +224,7 @@ class TestDatabaseManagerSessions:
         from sqlalchemy import NullPool
 
         audit_engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=NullPool)
-        async with audit_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # No tables needed — just testing session lifecycle
 
         initialised_mgr._public_audit_factory = build_session_factory(audit_engine)
         try:
@@ -241,8 +239,7 @@ class TestGetDbSession:
     async def sqlite_factory(self):
         from sqlalchemy.ext.asyncio import create_async_engine
         engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # No app tables needed — session lifecycle tests don't access any tables
         factory = build_session_factory(engine)
         yield factory
         await engine.dispose()
@@ -269,8 +266,7 @@ class TestGetPublicAuditSession:
     async def sqlite_factory(self):
         from sqlalchemy.ext.asyncio import create_async_engine
         engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # No app tables needed
         factory = build_session_factory(engine)
         yield factory
         await engine.dispose()
